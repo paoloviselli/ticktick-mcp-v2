@@ -230,12 +230,17 @@ The `ticktick-sdk` command provides several subcommands:
 | `ticktick-sdk` | Start the MCP server (default) |
 | `ticktick-sdk server` | Start the MCP server (explicit) |
 | `ticktick-sdk server --host HOST` | Use specific API host (`ticktick.com` or `dida365.com`) |
+| `ticktick-sdk server --transport streamable-http` | Run the server over Streamable HTTP |
+| `ticktick-sdk server --bind-host 0.0.0.0 --bind-port 8000` | Configure the HTTP listener |
+| `ticktick-sdk server --mount-path /mcp` | Override the Streamable HTTP mount path |
 | `ticktick-sdk server --enabledModules MODULES` | Enable only specific tool modules (comma-separated) |
 | `ticktick-sdk server --enabledTools TOOLS` | Enable only specific tools (comma-separated) |
 | `ticktick-sdk auth` | Get OAuth2 access token (opens browser) |
 | `ticktick-sdk auth --manual` | Get OAuth2 access token (SSH-friendly) |
 | `ticktick-sdk --version` | Show version information |
 | `ticktick-sdk --help` | Show help message |
+
+For local/hosted runbooks, see `docs/OPERATIONS.md`.
 
 **Tool Filtering** (reduces context window usage for AI assistants):
 
@@ -245,6 +250,9 @@ ticktick-sdk server --enabledModules tasks,projects
 
 # Enable specific tools only
 ticktick-sdk server --enabledTools ticktick_create_tasks,ticktick_list_tasks
+
+# Run locally over Streamable HTTP
+ticktick-sdk server --transport streamable-http --bind-host 0.0.0.0 --bind-port 8000
 
 # Available modules: tasks, projects, folders, columns, tags, habits, user, focus
 ```
@@ -261,7 +269,7 @@ Once configured, you can ask Claude things like:
 - "Check in my meditation habit for today"
 - "Create a new habit to drink 8 glasses of water daily"
 
-### Available MCP Tools (43 Total)
+### Available MCP Tools (45 Total)
 
 All mutation tools accept lists for batch operations (1-100 items).
 
@@ -271,6 +279,8 @@ All mutation tools accept lists for batch operations (1-100 items).
 | `ticktick_create_tasks` | Create 1-50 tasks with titles, dates, tags, etc. |
 | `ticktick_get_task` | Get task details by ID |
 | `ticktick_list_tasks` | List tasks (active/completed/abandoned/deleted via status filter) |
+| `ticktick_get_inbox_tasks` | List active tasks in the authenticated inbox |
+| `ticktick_get_calendar` | Build a date-grouped agenda view from scheduled tasks |
 | `ticktick_update_tasks` | Update 1-100 tasks (includes column assignment) |
 | `ticktick_complete_tasks` | Complete 1-100 tasks |
 | `ticktick_delete_tasks` | Delete 1-100 tasks (moves to trash) |
@@ -929,10 +939,16 @@ The inbox is a special project that cannot be deleted. Get its ID via `await cli
 | `TICKTICK_ACCESS_TOKEN` | Yes | OAuth2 access token (from auth command) |
 | `TICKTICK_USERNAME` | Yes | Your TickTick email |
 | `TICKTICK_PASSWORD` | Yes | Your TickTick password |
+| `TICKTICK_V2_SESSION_TOKEN` | No | Optional V2 warm-session bootstrap token |
 | `TICKTICK_REDIRECT_URI` | No | OAuth2 redirect URI (default: `http://127.0.0.1:8080/callback`) |
 | `TICKTICK_HOST` | No | API host: `ticktick.com` (default) or `dida365.com` (Chinese) |
 | `TICKTICK_TIMEOUT` | No | Request timeout in seconds (default: `30`) |
 | `TICKTICK_DEVICE_ID` | No | Device ID for V2 API (auto-generated) |
+| `TICKTICK_TRANSPORT_MODE` | No | Runtime hint used internally (`stdio` or `http`) |
+
+Notes:
+- Local STDIO runs prefer `TICKTICK_V2_SESSION_TOKEN` when present, then fall back to username/password.
+- Streamable HTTP runs are stateless and re-authenticate with username/password on cold starts; the session token is only a warm-start optimization.
 
 ---
 

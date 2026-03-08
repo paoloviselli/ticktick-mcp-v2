@@ -44,6 +44,8 @@ TOOL_MODULES = {
         "ticktick_create_tasks",
         "ticktick_get_task",
         "ticktick_list_tasks",
+        "ticktick_get_inbox_tasks",
+        "ticktick_get_calendar",
         "ticktick_update_tasks",
         "ticktick_complete_tasks",
         "ticktick_delete_tasks",
@@ -191,6 +193,10 @@ def run_server(
     enabled_tools: str | None = None,
     enabled_modules: str | None = None,
     host: str | None = None,
+    transport: str = "stdio",
+    bind_host: str | None = None,
+    bind_port: int | None = None,
+    mount_path: str | None = None,
 ) -> int:
     """
     Run the MCP server.
@@ -202,6 +208,10 @@ def run_server(
         enabled_tools: Comma-separated list of specific tools to enable.
         enabled_modules: Comma-separated list of modules to enable.
         host: API host ("ticktick.com" or "dida365.com").
+        transport: MCP transport ("stdio" or "streamable-http").
+        bind_host: Network bind host for HTTP transport.
+        bind_port: Network bind port for HTTP transport.
+        mount_path: Streamable HTTP mount path.
 
     Returns:
         Exit code (0 for success, non-zero for error).
@@ -232,7 +242,12 @@ def run_server(
 
     from ticktick_sdk.server import main as server_main
 
-    server_main()
+    server_main(
+        transport=transport,
+        bind_host=bind_host,
+        bind_port=bind_port,
+        mount_path=mount_path,
+    )
     return 0
 
 
@@ -322,6 +337,14 @@ Available modules: tasks, projects, folders, columns, tags, habits, user, focus
     )
 
     server_parser.add_argument(
+        "--transport",
+        type=str,
+        default="stdio",
+        choices=["stdio", "streamable-http"],
+        help="Server transport. Use 'streamable-http' for Claude.ai/Vercel-compatible hosting.",
+    )
+
+    server_parser.add_argument(
         "--enabledTools",
         type=str,
         default=None,
@@ -352,8 +375,32 @@ Available modules: tasks, projects, folders, columns, tags, habits, user, focus
         help=(
             "API host to use. Options: ticktick.com (international, default), "
             "dida365.com (Chinese version). "
-            "Can also be set via TICKTICK_HOST environment variable."
+                "Can also be set via TICKTICK_HOST environment variable."
         ),
+    )
+
+    server_parser.add_argument(
+        "--bind-host",
+        type=str,
+        default=None,
+        metavar="BIND_HOST",
+        help="Network bind host for streamable-http transport (default: FastMCP default).",
+    )
+
+    server_parser.add_argument(
+        "--bind-port",
+        type=int,
+        default=None,
+        metavar="BIND_PORT",
+        help="Network bind port for streamable-http transport (default: FastMCP default).",
+    )
+
+    server_parser.add_argument(
+        "--mount-path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Mount path for streamable-http transport (default: /mcp).",
     )
 
     # Auth subcommand
@@ -421,6 +468,10 @@ def main() -> int | NoReturn:
             enabled_tools=args.enabledTools,
             enabled_modules=args.enabledModules,
             host=args.host,
+            transport=args.transport,
+            bind_host=args.bind_host,
+            bind_port=args.bind_port,
+            mount_path=args.mount_path,
         )
     elif args.command == "auth":
         return run_auth(manual=args.manual)

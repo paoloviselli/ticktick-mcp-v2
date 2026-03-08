@@ -136,6 +136,10 @@ class TickTickV2Client(BaseTickTickClient):
         self,
         device_id: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        username: str | None = None,
+        password: str | None = None,
+        session_token: str | None = None,
+        prefer_password_login: bool = False,
     ) -> None:
         super().__init__(timeout=timeout)
 
@@ -143,6 +147,10 @@ class TickTickV2Client(BaseTickTickClient):
             device_id=device_id,
             timeout=timeout,
         )
+        self._username = username
+        self._password = password
+        self._session_token = session_token
+        self._prefer_password_login = prefer_password_login
 
     # =========================================================================
     # Abstract Property Implementations
@@ -221,6 +229,8 @@ class TickTickV2Client(BaseTickTickClient):
         Returns:
             SessionToken with authentication credentials
         """
+        self._username = username
+        self._password = password
         return await self._session_handler.authenticate(username, password)
 
     async def authenticate_2fa(
@@ -244,6 +254,25 @@ class TickTickV2Client(BaseTickTickClient):
         """Set an existing session directly."""
         self._session_handler.set_session(session)
 
+    def bootstrap_session(
+        self,
+        token: str,
+        *,
+        username: str | None = None,
+        inbox_id: str = "",
+        user_id: str = "",
+        cookies: dict[str, str] | None = None,
+    ) -> SessionToken:
+        """Bootstrap a session from an existing token without logging in."""
+        self._session_token = token
+        return self._session_handler.bootstrap_session(
+            token,
+            username=username,
+            inbox_id=inbox_id,
+            user_id=user_id,
+            cookies=cookies,
+        )
+
     @property
     def session(self) -> SessionToken | None:
         """Get the current session."""
@@ -253,6 +282,112 @@ class TickTickV2Client(BaseTickTickClient):
     def inbox_id(self) -> str | None:
         """Get the inbox ID."""
         return self._session_handler.inbox_id
+
+    async def initialize_session(self) -> SessionToken:
+        """Initialize V2 authentication using the configured auth strategy."""
+        if self._prefer_password_login and self._username and self._password:
+            session = await self.authenticate(self._username, self._password)
+            await self._refresh_session_metadata()
+            return session
+
+        if self._session_token:
+            self.bootstrap_session(
+                self._session_token,
+                username=self._username,
+            )
+            try:
+                await self.verify_authentication()
+                await self._refresh_session_metadata()
+                if self.session is not None:
+                    return self.session
+            except TickTickAuthenticationError:
+                self._session_handler.clear_session()
+
+        if self._username and self._password:
+            session = await self.authenticate(self._username, self._password)
+            await self._refresh_session_metadata()
+            return session
+
+        if self.session is not None:
+            return self.session
+
+        raise TickTickAuthenticationError(
+            "V2 authentication could not be initialized",
+        )
+
+    async def _refresh_session_metadata(self) -> None:
+        """Fetch missing session metadata after bootstrapping or re-auth."""
+        if self.session is None:
+            return
+
+        if self.session.inbox_id and self.session.username:
+            return
+
+        status = await self.get_user_status()
+        session = self.session
+        if session is None:
+            return
+        session.inbox_id = status.get("inboxId", session.inbox_id)
+        session.username = status.get("username", session.username)
+        session.user_id = str(status.get("userId", session.user_id))
+
+    async def _reauthenticate(self) -> None:
+        """Re-authenticate using stored credentials or a bootstrap token."""
+        self._session_handler.clear_session()
+
+        if self._username and self._password:
+            await self.authenticate(self._username, self._password)
+            await self._refresh_session_metadata()
+            return
+
+        if self._session_token:
+            self.bootstrap_session(
+                self._session_token,
+                username=self._username,
+            )
+            await self.verify_authentication()
+            await self._refresh_session_metadata()
+            return
+
+        raise TickTickAuthenticationError(
+            "V2 authentication failed and no re-auth credentials are available",
+        )
+
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | list[Any] | None = None,
+        headers: dict[str, str] | None = None,
+        require_auth: bool = True,
+        _retry_on_auth: bool = True,
+    ) -> httpx.Response:
+        """Retry V2 requests once after refreshing the session on auth failures."""
+        try:
+            return await super()._request(
+                method,
+                endpoint,
+                params=params,
+                json_data=json_data,
+                headers=headers,
+                require_auth=require_auth,
+            )
+        except TickTickAuthenticationError:
+            if not require_auth or not _retry_on_auth:
+                raise
+
+            await self._reauthenticate()
+            return await self._request(
+                method,
+                endpoint,
+                params=params,
+                json_data=json_data,
+                headers=headers,
+                require_auth=require_auth,
+                _retry_on_auth=False,
+            )
 
     # =========================================================================
     # Sync Endpoint

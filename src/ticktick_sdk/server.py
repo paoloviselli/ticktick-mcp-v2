@@ -94,6 +94,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Any, AsyncIterator
@@ -116,6 +117,8 @@ from ticktick_sdk.tools.inputs import (
     TaskListInput,
     PinTasksInput,
     SearchInput,
+    InboxTasksInput,
+    CalendarInput,
     # Project inputs
     ProjectCreateInput,
     ProjectGetInput,
@@ -169,6 +172,8 @@ from ticktick_sdk.tools.formatting import (
     format_user_markdown,
     format_user_status_markdown,
     format_statistics_markdown,
+    format_calendar_markdown,
+    format_calendar_json,
     format_response,
     success_message,
     error_message,
@@ -192,6 +197,8 @@ CHARACTER_LIMIT = 25000
 DEFAULT_TASK_LIMIT = 50
 DEFAULT_PROJECT_LIMIT = 100
 MAX_TASK_LIMIT = 200
+DEFAULT_HTTP_PATH = "/mcp"
+_TOOL_FILTERING_APPLIED = False
 
 
 # =============================================================================
@@ -273,12 +280,35 @@ async def lifespan(mcp: FastMCP) -> AsyncIterator[dict[str, Any]]:
 mcp = FastMCP(
     "ticktick_sdk",
     lifespan=lifespan,
+    streamable_http_path=DEFAULT_HTTP_PATH,
+    json_response=True,
 )
 
 
 def get_client(ctx: Context) -> TickTickClient:
     """Get the TickTick client from context."""
     return ctx.request_context.lifespan_context["client"]
+
+
+def configure_server(
+    *,
+    transport: str = "stdio",
+    bind_host: str | None = None,
+    bind_port: int | None = None,
+    mount_path: str | None = None,
+) -> FastMCP:
+    """Configure the shared FastMCP instance for the selected transport."""
+    mcp.settings.json_response = True
+    mcp.settings.stateless_http = transport == "streamable-http"
+    if bind_host is not None:
+        mcp.settings.host = bind_host
+    if bind_port is not None:
+        mcp.settings.port = bind_port
+    if mount_path:
+        mcp.settings.streamable_http_path = mount_path
+
+    os.environ["TICKTICK_TRANSPORT_MODE"] = "http" if transport == "streamable-http" else "stdio"
+    return mcp
 
 
 # =============================================================================
@@ -645,15 +675,28 @@ async def ticktick_list_tasks(params: TaskListInput, ctx: Context) -> str:
             if params.from_date and params.to_date:
                 from_dt = datetime.fromisoformat(params.from_date)
                 to_dt = datetime.fromisoformat(params.to_date)
+                tasks = await client.get_completed_tasks_in_range(
+                    from_dt,
+                    to_dt,
+                    limit=params.limit,
+                )
             else:
                 to_dt = datetime.now()
                 from_dt = to_dt - timedelta(days=params.days)
-
-            tasks = await client.get_completed_tasks(days=params.days, limit=params.limit)
+                tasks = await client.get_completed_tasks(days=params.days, limit=params.limit)
 
         elif params.status == "abandoned":
             # Abandoned tasks require date range
-            tasks = await client.get_abandoned_tasks(days=params.days, limit=params.limit)
+            if params.from_date and params.to_date:
+                from_dt = datetime.fromisoformat(params.from_date)
+                to_dt = datetime.fromisoformat(params.to_date)
+                tasks = await client.get_abandoned_tasks_in_range(
+                    from_dt,
+                    to_dt,
+                    limit=params.limit,
+                )
+            else:
+                tasks = await client.get_abandoned_tasks(days=params.days, limit=params.limit)
 
         elif params.status == "deleted":
             tasks = await client.get_deleted_tasks(limit=params.limit)
@@ -676,6 +719,95 @@ async def ticktick_list_tasks(params: TaskListInput, ctx: Context) -> str:
 
     except Exception as e:
         return handle_error(e, "list_tasks")
+
+
+@mcp.tool(
+    name="ticktick_get_inbox_tasks",
+    annotations={
+        "title": "Get Inbox Tasks",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def ticktick_get_inbox_tasks(params: InboxTasksInput, ctx: Context) -> str:
+    """Get active tasks from the authenticated account inbox."""
+    try:
+        client = get_client(ctx)
+        tasks = await client.get_inbox_tasks(limit=params.limit)
+
+        if params.response_format == ResponseFormat.MARKDOWN:
+            return format_tasks_markdown(tasks, title="Inbox Tasks")
+        return json.dumps(format_tasks_json(tasks), indent=2)
+    except Exception as e:
+        return handle_error(e, "get_inbox_tasks")
+
+
+@mcp.tool(
+    name="ticktick_get_calendar",
+    annotations={
+        "title": "Get Calendar",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+)
+async def ticktick_get_calendar(params: CalendarInput, ctx: Context) -> str:
+    """Build a date-grouped agenda view from scheduled tasks."""
+    try:
+        client = get_client(ctx)
+        tasks = await client.get_all_tasks()
+
+        if params.include_completed:
+            to_dt = datetime.fromisoformat(params.end_date) if params.end_date else datetime.now()
+            from_dt = (
+                datetime.fromisoformat(params.start_date)
+                if params.start_date
+                else to_dt - timedelta(days=params.days)
+            )
+            tasks.extend(await client.get_completed_tasks_in_range(from_dt, to_dt, limit=500))
+
+        if params.start_date and params.end_date:
+            start_day = datetime.fromisoformat(params.start_date).date()
+            end_day = datetime.fromisoformat(params.end_date).date()
+        else:
+            start_day = date.today()
+            end_day = start_day + timedelta(days=params.days - 1)
+
+        filtered: dict[date, list[Any]] = {}
+        for task in tasks:
+            scheduled = task.due_date or task.start_date
+            if scheduled is None:
+                continue
+            scheduled_day = scheduled.date()
+            if scheduled_day < start_day or scheduled_day > end_day:
+                continue
+            if params.project_id and task.project_id != params.project_id:
+                continue
+            if params.tag and params.tag.lower() not in {tag.lower() for tag in task.tags}:
+                continue
+            filtered.setdefault(scheduled_day, []).append(task)
+
+        grouped = {
+            day: sorted(
+                day_tasks,
+                key=lambda task: (
+                    (task.due_date or task.start_date) is None,
+                    task.is_all_day is False,
+                    task.due_date or task.start_date,
+                    task.title or "",
+                ),
+            )
+            for day, day_tasks in filtered.items()
+        }
+
+        if params.response_format == ResponseFormat.MARKDOWN:
+            return format_calendar_markdown(grouped, title="Calendar")
+        return json.dumps(format_calendar_json(grouped), indent=2)
+    except Exception as e:
+        return handle_error(e, "get_calendar")
 
 
 @mcp.tool(
@@ -2762,10 +2894,14 @@ def _apply_tool_filtering():
     This removes tools that are not in the enabled list, reducing context window
     usage when using the MCP server with AI assistants.
     """
-    import os
+    global _TOOL_FILTERING_APPLIED
+
+    if _TOOL_FILTERING_APPLIED:
+        return
 
     enabled_tools_env = os.environ.get("TICKTICK_ENABLED_TOOLS")
     if not enabled_tools_env:
+        _TOOL_FILTERING_APPLIED = True
         return  # No filtering, all tools enabled
 
     enabled_tools = set(enabled_tools_env.split(","))
@@ -2791,12 +2927,42 @@ def _apply_tool_filtering():
         remaining,
         len(all_tools),
     )
+    _TOOL_FILTERING_APPLIED = True
 
 
-def main():
+def main(
+    *,
+    transport: str = "stdio",
+    bind_host: str | None = None,
+    bind_port: int | None = None,
+    mount_path: str | None = None,
+):
     """Main entry point for the TickTick MCP server."""
+    configure_server(
+        transport=transport,
+        bind_host=bind_host,
+        bind_port=bind_port,
+        mount_path=mount_path,
+    )
     _apply_tool_filtering()
-    mcp.run()
+    mcp.run(transport=transport)
+
+
+def get_streamable_http_app(
+    *,
+    bind_host: str | None = None,
+    bind_port: int | None = None,
+    mount_path: str | None = None,
+):
+    """Get the shared Streamable HTTP ASGI app."""
+    configure_server(
+        transport="streamable-http",
+        bind_host=bind_host,
+        bind_port=bind_port,
+        mount_path=mount_path,
+    )
+    _apply_tool_filtering()
+    return mcp.streamable_http_app()
 
 
 if __name__ == "__main__":

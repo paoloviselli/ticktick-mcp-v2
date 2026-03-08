@@ -104,6 +104,10 @@ class TickTickSettings(BaseSettings):
         default=SecretStr(""),
         description="TickTick account password",
     )
+    v2_session_token: SecretStr | None = Field(
+        default=None,
+        description="Optional TickTick V2 session token used to bootstrap warm sessions",
+    )
 
     # =========================================================================
     # General Settings
@@ -122,6 +126,11 @@ class TickTickSettings(BaseSettings):
     device_id: str = Field(
         default_factory=_generate_object_id,
         description="Unique device identifier for V2 API (MongoDB-style ObjectId)",
+    )
+    transport_mode: str = Field(
+        default="stdio",
+        description="Server transport mode: stdio or http",
+        pattern=r"^(stdio|http)$",
     )
 
     # =========================================================================
@@ -159,6 +168,11 @@ class TickTickSettings(BaseSettings):
             self.username
             and self.password.get_secret_value()
         )
+
+    @property
+    def has_v2_session_token(self) -> bool:
+        """Check if a V2 session token is configured."""
+        return bool(self.v2_session_token and self.v2_session_token.get_secret_value())
 
     @property
     def is_fully_configured(self) -> bool:
@@ -247,6 +261,12 @@ class TickTickSettings(BaseSettings):
     def get_v2_password(self) -> str:
         """Get the V2 password value."""
         return self.password.get_secret_value()
+
+    def get_v2_session_token(self) -> str | None:
+        """Get the V2 session token value if available."""
+        if self.v2_session_token:
+            return self.v2_session_token.get_secret_value()
+        return None
 
 
 # Global settings instance (lazy initialization)

@@ -238,9 +238,11 @@ class UnifiedTickTickAPI:
         # V2 Session credentials
         username: str | None = None,
         password: str | None = None,
+        v2_session_token: str | None = None,
         # General
         timeout: float = 30.0,
         device_id: str | None = None,
+        transport_mode: str = "stdio",
     ) -> None:
         # Store credentials for lazy initialization
         self._v1_credentials = {
@@ -253,8 +255,10 @@ class UnifiedTickTickAPI:
         self._v2_credentials = {
             "username": username,
             "password": password,
+            "session_token": v2_session_token,
             "device_id": device_id,
             "timeout": timeout,
+            "prefer_password_login": transport_mode == "http",
         }
 
         # Clients (lazy initialized)
@@ -302,18 +306,14 @@ class UnifiedTickTickAPI:
             self._v2_client = TickTickV2Client(
                 device_id=self._v2_credentials["device_id"],
                 timeout=self._v2_credentials["timeout"],
+                username=self._v2_credentials["username"],
+                password=self._v2_credentials["password"],
+                session_token=self._v2_credentials["session_token"],
+                prefer_password_login=self._v2_credentials["prefer_password_login"],
             )
-
-            # Authenticate V2 if credentials provided
-            if self._v2_credentials["username"] and self._v2_credentials["password"]:
-                session = await self._v2_client.authenticate(
-                    self._v2_credentials["username"],
-                    self._v2_credentials["password"],
-                )
-                self._inbox_id = session.inbox_id
-                logger.info("V2 client authenticated")
-            else:
-                errors.append("V2 credentials not provided")
+            session = await self._v2_client.initialize_session()
+            self._inbox_id = session.inbox_id or self._v2_client.inbox_id
+            logger.info("V2 client authenticated")
         except Exception as e:
             errors.append(f"V2 initialization failed: {e}")
             logger.error("Failed to initialize V2 client: %s", e)

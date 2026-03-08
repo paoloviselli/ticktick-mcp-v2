@@ -344,6 +344,29 @@ class SessionHandler:
         """Set an existing session directly."""
         self._session = session
 
+    def bootstrap_session(
+        self,
+        token: str,
+        *,
+        username: str | None = None,
+        inbox_id: str = "",
+        user_id: str = "",
+        cookies: dict[str, str] | None = None,
+    ) -> SessionToken:
+        """Bootstrap a session from an existing token without logging in."""
+        session_cookies = {"t": token}
+        if cookies:
+            session_cookies.update(cookies)
+
+        self._session = SessionToken(
+            token=token,
+            user_id=user_id,
+            username=username or "",
+            inbox_id=inbox_id,
+            cookies=session_cookies,
+        )
+        return self._session
+
     def clear_session(self) -> None:
         """Clear the current session."""
         self._session = None

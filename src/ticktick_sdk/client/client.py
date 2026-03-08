@@ -74,9 +74,11 @@ class TickTickClient:
         # V2 Session credentials
         username: str | None = None,
         password: str | None = None,
+        v2_session_token: str | None = None,
         # General
         timeout: float = 30.0,
         device_id: str | None = None,
+        transport_mode: str = "stdio",
     ) -> None:
         self._api = UnifiedTickTickAPI(
             client_id=client_id,
@@ -85,8 +87,10 @@ class TickTickClient:
             v1_access_token=v1_access_token,
             username=username,
             password=password,
+            v2_session_token=v2_session_token,
             timeout=timeout,
             device_id=device_id,
+            transport_mode=transport_mode,
         )
         self._initialized = False
 
@@ -114,8 +118,10 @@ class TickTickClient:
             v1_access_token=settings.get_v1_access_token(),
             username=settings.username,
             password=settings.get_v2_password(),
+            v2_session_token=settings.get_v2_session_token(),
             timeout=settings.timeout,
             device_id=settings.device_id,
+            transport_mode=settings.transport_mode,
         )
 
     # =========================================================================
@@ -313,6 +319,15 @@ class TickTickClient:
         from_date = to_date - timedelta(days=days)
         return await self._api.list_completed_tasks(from_date, to_date, limit)
 
+    async def get_completed_tasks_in_range(
+        self,
+        from_date: datetime,
+        to_date: datetime,
+        limit: int = 100,
+    ) -> list[Task]:
+        """Get completed tasks for an explicit date range."""
+        return await self._api.list_completed_tasks(from_date, to_date, limit)
+
     async def move_task(
         self,
         task_id: str,
@@ -382,6 +397,15 @@ class TickTickClient:
         from_date = to_date - timedelta(days=days)
         return await self._api.list_abandoned_tasks(from_date, to_date, limit)
 
+    async def get_abandoned_tasks_in_range(
+        self,
+        from_date: datetime,
+        to_date: datetime,
+        limit: int = 100,
+    ) -> list[Task]:
+        """Get abandoned tasks for an explicit date range."""
+        return await self._api.list_abandoned_tasks(from_date, to_date, limit)
+
     async def get_deleted_tasks(
         self,
         limit: int = 100,
@@ -396,6 +420,13 @@ class TickTickClient:
             List of deleted tasks
         """
         return await self._api.list_deleted_tasks(0, limit)
+
+    async def get_inbox_tasks(self, limit: int = 100) -> list[Task]:
+        """Get active tasks in the inbox project."""
+        if self.inbox_id is None:
+            return []
+        tasks = await self.get_all_tasks()
+        return [task for task in tasks if task.project_id == self.inbox_id][:limit]
 
     # =========================================================================
     # Projects

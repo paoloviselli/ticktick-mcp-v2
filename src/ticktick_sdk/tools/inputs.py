@@ -550,6 +550,59 @@ class SearchInput(BaseMCPInput):
         return v.strip()
 
 
+class InboxTasksInput(BaseMCPInput):
+    """Input for listing inbox tasks."""
+
+    limit: int = Field(
+        default=50,
+        description="Maximum number of inbox tasks to return",
+        ge=1,
+        le=500,
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.MARKDOWN,
+        description="Output format",
+    )
+
+
+class CalendarInput(BaseMCPInput):
+    """Input for building a calendar/agenda view from tasks."""
+
+    start_date: Optional[str] = Field(
+        default=None,
+        description="Start date in YYYY-MM-DD format",
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    )
+    end_date: Optional[str] = Field(
+        default=None,
+        description="End date in YYYY-MM-DD format",
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    )
+    days: int = Field(
+        default=7,
+        description="Number of days to include when explicit dates are not provided",
+        ge=1,
+        le=90,
+    )
+    project_id: Optional[str] = Field(
+        default=None,
+        description="Filter by project ID",
+        pattern=r"^(inbox\d+|[a-f0-9]{24})$",
+    )
+    tag: Optional[str] = Field(
+        default=None,
+        description="Filter by tag name",
+    )
+    include_completed: bool = Field(
+        default=False,
+        description="Whether to include completed tasks with scheduled dates",
+    )
+    response_format: ResponseFormat = Field(
+        default=ResponseFormat.MARKDOWN,
+        description="Output format",
+    )
+
+
 # =============================================================================
 # Project Input Models
 # =============================================================================

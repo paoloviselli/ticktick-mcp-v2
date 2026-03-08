@@ -1,0 +1,17 @@
+{
+  "functions": {
+    "api/index.py": {
+      "runtime": "python3.11"
+    }
+  },
+  "routes": [
+    {
+      "src": "/mcp",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/mcp/(.*)",
+      "dest": "api/index.py"
+    }
+  ]
+}

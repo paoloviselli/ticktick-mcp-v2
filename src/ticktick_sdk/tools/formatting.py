@@ -8,7 +8,7 @@ in both Markdown and JSON formats.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Callable
 
 from ticktick_sdk.models import Column, Task, Project, ProjectGroup, Tag, User, UserStatus, UserStatistics
@@ -155,6 +155,46 @@ def format_tasks_json(tasks: list[Task]) -> dict[str, Any]:
     return {
         "count": len(tasks),
         "tasks": [format_task_json(t) for t in tasks],
+    }
+
+
+def format_calendar_markdown(
+    grouped_tasks: dict[date, list[Task]],
+    *,
+    title: str = "Calendar",
+) -> str:
+    """Format grouped tasks as a simple agenda view."""
+    if not grouped_tasks:
+        return f"# {title}\n\nNo scheduled tasks found."
+
+    lines = [f"# {title}", ""]
+    for day in sorted(grouped_tasks):
+        lines.append(f"## {day.isoformat()}")
+        for task in grouped_tasks[day]:
+            when = task.due_date or task.start_date
+            when_label = when.strftime("%H:%M") if when and not task.is_all_day else "All day"
+            lines.append(
+                f"- **{task.title or '(No title)'}** (`{task.id}`)"
+                f" [{when_label}]"
+            )
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def format_calendar_json(grouped_tasks: dict[date, list[Task]]) -> dict[str, Any]:
+    """Format grouped tasks as calendar JSON."""
+    days = []
+    for day in sorted(grouped_tasks):
+        days.append(
+            {
+                "date": day.isoformat(),
+                "count": len(grouped_tasks[day]),
+                "tasks": [format_task_json(task) for task in grouped_tasks[day]],
+            }
+        )
+    return {
+        "count": sum(len(tasks) for tasks in grouped_tasks.values()),
+        "days": days,
     }
 
 

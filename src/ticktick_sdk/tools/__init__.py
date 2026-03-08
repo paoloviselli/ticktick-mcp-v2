@@ -33,6 +33,8 @@ from ticktick_sdk.tools.inputs import (
     PinTasksInput,
     TaskListInput,
     SearchInput,
+    InboxTasksInput,
+    CalendarInput,
     # Project inputs
     ProjectCreateInput,
     ProjectGetInput,
@@ -86,6 +88,8 @@ __all__ = [
     "PinTasksInput",
     "TaskListInput",
     "SearchInput",
+    "InboxTasksInput",
+    "CalendarInput",
     # Project inputs
     "ProjectCreateInput",
     "ProjectGetInput",
