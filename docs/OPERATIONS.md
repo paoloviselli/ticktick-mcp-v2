@@ -26,14 +26,14 @@ This serves the MCP endpoint at `http://127.0.0.1:8000/mcp`.
 - `TICKTICK_USERNAME` and `TICKTICK_PASSWORD` are the dependable V2 auth path.
 - `TICKTICK_V2_SESSION_TOKEN` is optional and used to bootstrap warm sessions.
 - HTTP/stateless deployments re-authenticate with username/password on cold starts.
-- `MCP_BEARER_TOKEN` is optional but recommended for any public HTTP deployment.
+- `MCP_URL_KEY` is optional but recommended for any public HTTP deployment.
 
 ## Vercel
 
 - The ASGI entrypoint is `api/index.py`.
 - Configure all TickTick env vars in the Vercel project.
 - Add `PUBLIC_BASE_URL=https://YOUR-APP.vercel.app`.
-- Add `MCP_BEARER_TOKEN=<long-random-secret>` to block unauthenticated access.
+- Add `MCP_URL_KEY=<long-random-secret>` to block unauthenticated access.
 - The deployed MCP endpoint is `/mcp`.
 
 ## Railway
@@ -65,4 +65,4 @@ pytest tests/test_server_http.py -q
 - Inbox issues: call `ticktick_get_status` first and verify `inbox_id` is present, then call `ticktick_get_inbox_tasks`.
 - V2 auth failures on HTTP: confirm username/password are present and valid even if `TICKTICK_V2_SESSION_TOKEN` is set.
 - Tool count drift: the current MCP surface should list 45 tools.
-- `401 Unauthorized` from `/mcp`: confirm the request is sending `Authorization: Bearer <MCP_BEARER_TOKEN>`.
+- `401 Unauthorized` from `/mcp`: confirm the connector URL includes `?key=<MCP_URL_KEY>`.
