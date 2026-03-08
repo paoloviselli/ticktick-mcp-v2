@@ -1,17 +1,18 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/index.py": {
-      "runtime": "python3.11"
+      "maxDuration": 300
     }
   },
-  "routes": [
+  "rewrites": [
     {
-      "src": "/mcp",
-      "dest": "api/index.py"
+      "source": "/mcp",
+      "destination": "/api/index.py"
     },
     {
-      "src": "/mcp/(.*)",
-      "dest": "api/index.py"
+      "source": "/mcp/(.*)",
+      "destination": "/api/index.py"
     }
   ]
 }
