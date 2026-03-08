@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import importlib
+import os
 from unittest.mock import patch
 
 import httpx
@@ -159,3 +160,64 @@ async def test_streamable_http_cold_start_simulation_reconnects_per_app():
 
     assert len(created_clients) >= 2
     assert all(client.connect_calls == client.disconnect_calls == 1 for client in created_clients)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streamable_http_requires_bearer_token_when_configured():
+    fake_client = FakeTickTickClient()
+
+    with (
+        patch.dict(os.environ, {"MCP_BEARER_TOKEN": "top-secret"}, clear=False),
+        patch("ticktick_sdk.client.TickTickClient.from_settings", return_value=fake_client),
+    ):
+        app = build_fresh_app()
+        async with running_app(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://127.0.0.1:8000",
+            ) as client:
+                response = await client.post(
+                    "/mcp",
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-03-26",
+                            "capabilities": {},
+                            "clientInfo": {"name": "pytest", "version": "1.0"},
+                        },
+                    },
+                    headers={"Accept": "application/json, text/event-stream"},
+                )
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "Unauthorized"
+    assert response.headers["WWW-Authenticate"] == 'Bearer realm="ticktick-mcp"'
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streamable_http_accepts_valid_bearer_token():
+    fake_client = FakeTickTickClient()
+
+    with (
+        patch.dict(os.environ, {"MCP_BEARER_TOKEN": "top-secret"}, clear=False),
+        patch("ticktick_sdk.client.TickTickClient.from_settings", return_value=fake_client),
+    ):
+        app = build_fresh_app()
+        async with running_app(app):
+            async with streamable_http_client(
+                "http://127.0.0.1:8000/mcp",
+                http_client=httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://127.0.0.1:8000",
+                    headers={"Authorization": "Bearer top-secret"},
+                ),
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    tools = await session.list_tools()
+
+    assert len(tools.tools) == 45

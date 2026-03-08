@@ -945,10 +945,43 @@ The inbox is a special project that cannot be deleted. Get its ID via `await cli
 | `TICKTICK_TIMEOUT` | No | Request timeout in seconds (default: `30`) |
 | `TICKTICK_DEVICE_ID` | No | Device ID for V2 API (auto-generated) |
 | `TICKTICK_TRANSPORT_MODE` | No | Runtime hint used internally (`stdio` or `http`) |
+| `MCP_BEARER_TOKEN` | No | Optional static bearer token required by the public HTTP endpoint |
 
 Notes:
 - Local STDIO runs prefer `TICKTICK_V2_SESSION_TOKEN` when present, then fall back to username/password.
 - Streamable HTTP runs are stateless and re-authenticate with username/password on cold starts; the session token is only a warm-start optimization.
+- When `MCP_BEARER_TOKEN` is set, every HTTP request must send `Authorization: Bearer <token>`.
+
+## Protecting A Public HTTP Deployment
+
+If you deploy the MCP server to Vercel or Railway, set `MCP_BEARER_TOKEN` to a long random secret.
+
+Example:
+
+```bash
+python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(32))
+PY
+```
+
+Then clients must include:
+
+```http
+Authorization: Bearer <your-secret>
+```
+
+Quick verification:
+
+```bash
+curl -i -X POST https://YOUR-APP.vercel.app/mcp \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_SECRET' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+```
+
+Without the bearer token, the server returns `401 Unauthorized`.
 
 ---
 
