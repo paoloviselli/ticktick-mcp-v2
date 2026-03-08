@@ -100,6 +100,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, AsyncIterator
 
 from mcp.server.fastmcp import FastMCP, Context
+from mcp.server.fastmcp.server import TransportSecuritySettings
 
 from ticktick_sdk.client import TickTickClient
 from ticktick_sdk.settings import get_settings
@@ -306,6 +307,40 @@ def configure_server(
         mcp.settings.port = bind_port
     if mount_path:
         mcp.settings.streamable_http_path = mount_path
+
+    if transport == "streamable-http":
+        allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+        allowed_origins = [
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+        ]
+
+        vercel_url = os.environ.get("VERCEL_URL")
+        if vercel_url:
+            allowed_hosts.extend([vercel_url, f"{vercel_url}:*"])
+            allowed_origins.extend([f"https://{vercel_url}", f"https://{vercel_url}:*"])
+
+        custom_public_url = os.environ.get("PUBLIC_BASE_URL")
+        if custom_public_url:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(custom_public_url)
+            if parsed.hostname:
+                allowed_hosts.extend([parsed.hostname, f"{parsed.hostname}:*"])
+                if parsed.scheme in {"http", "https"}:
+                    allowed_origins.extend(
+                        [
+                            f"{parsed.scheme}://{parsed.hostname}",
+                            f"{parsed.scheme}://{parsed.hostname}:*",
+                        ]
+                    )
+
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+            allowed_origins=allowed_origins,
+        )
 
     os.environ["TICKTICK_TRANSPORT_MODE"] = "http" if transport == "streamable-http" else "stdio"
     return mcp
