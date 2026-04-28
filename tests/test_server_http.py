@@ -125,8 +125,12 @@ async def test_streamable_http_lists_45_tools_and_calls_new_tools():
                         {"params": {"days": 7, "response_format": "markdown"}},
                     )
 
-    assert fake_client.connect_calls >= 1
-    assert fake_client.disconnect_calls >= 1
+    # The client is a process-wide singleton: it must connect once on cold
+    # start and must NOT be disconnected per request (that would force an
+    # OAuth handshake on every MCP call and inflate Vercel provisioned-memory
+    # billing — see modelcontextprotocol/python-sdk#1304).
+    assert fake_client.connect_calls == 1
+    assert fake_client.disconnect_calls == 0
     assert "Inbox Tasks" in inbox_result.content[0].text
     assert "Calendar" in calendar_result.content[0].text
 
@@ -143,14 +147,16 @@ async def test_streamable_http_cold_start_simulation_reconnects_per_app():
 
     with patch("ticktick_sdk.client.TickTickClient.from_settings", side_effect=make_client):
         first_app = build_fresh_app()
-        second_app = build_fresh_app()
-
         async with running_app(first_app):
             await call_http_tool(
                 first_app,
                 "ticktick_get_inbox_tasks",
                 {"limit": 5, "response_format": "json"},
             )
+
+        # Simulate a cold start (process restart) — the shared singleton
+        # is bound to the module, so a fresh process gets a fresh client.
+        second_app = build_fresh_app()
         async with running_app(second_app):
             await call_http_tool(
                 second_app,
@@ -159,7 +165,9 @@ async def test_streamable_http_cold_start_simulation_reconnects_per_app():
             )
 
     assert len(created_clients) >= 2
-    assert all(client.connect_calls == client.disconnect_calls == 1 for client in created_clients)
+    assert all(client.connect_calls == 1 for client in created_clients)
+    # Singleton is intentionally never disconnected — see lifespan docstring.
+    assert all(client.disconnect_calls == 0 for client in created_clients)
 
 
 @pytest.mark.unit
