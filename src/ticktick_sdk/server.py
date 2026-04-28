@@ -92,6 +92,7 @@ Tools return clear, actionable error messages:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -254,27 +255,41 @@ def truncate_response(
 # =============================================================================
 
 
+# Shared client singleton. The MCP Python SDK runs `lifespan` per-request when
+# `stateless_http=True` (modelcontextprotocol/python-sdk#1304), so we cannot
+# rely on the lifespan to amortize `client.connect()`. Caching the connected
+# client at module scope keeps OAuth/auth out of the hot path and makes warm
+# Vercel invocations effectively free in provisioned-memory time.
+_shared_client: TickTickClient | None = None
+_shared_client_lock = asyncio.Lock()
+
+
+async def _get_or_create_client() -> TickTickClient:
+    global _shared_client
+    if _shared_client is not None:
+        return _shared_client
+    async with _shared_client_lock:
+        if _shared_client is not None:
+            return _shared_client
+        client = TickTickClient.from_settings()
+        await client.connect()
+        _shared_client = client
+        logger.info("TickTick client connected (shared singleton)")
+        return _shared_client
+
+
 @asynccontextmanager
 async def lifespan(mcp: FastMCP) -> AsyncIterator[dict[str, Any]]:
     """
-    Manage the TickTick client lifecycle.
+    Yield the shared TickTick client to MCP request contexts.
 
-    Initializes the client on startup and closes it on shutdown.
+    The client is created once per process and reused across requests. We
+    deliberately do not disconnect on context exit because, in stateless-http
+    mode, this lifespan runs per-request — disconnecting here would close the
+    shared client and force a fresh OAuth handshake on every call.
     """
-    logger.info("Initializing TickTick MCP Server...")
-
-    try:
-        client = TickTickClient.from_settings()
-        await client.connect()
-        logger.info("TickTick client connected successfully")
-        yield {"client": client}
-    except Exception as e:
-        logger.error("Failed to initialize TickTick client: %s", e)
-        raise
-    finally:
-        if "client" in locals():
-            await client.disconnect()
-            logger.info("TickTick client disconnected")
+    client = await _get_or_create_client()
+    yield {"client": client}
 
 
 # Initialize FastMCP server
